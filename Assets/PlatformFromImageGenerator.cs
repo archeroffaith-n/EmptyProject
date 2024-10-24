@@ -10,8 +10,9 @@ public class PlatformFromImageGenerator : MonoBehaviour
     public UnityEngine.U2D.SpriteShape spriteShapeProfile;
     public string imagePath;
     public int grayThreshold = 110;
-    public float criticalDrop = 0.0001f;
+    public float criticalDrop = 0.003f;
     public float scale = 100f;
+    public bool scaleFix = true;
 
     private GameObject[] platforms;
 
@@ -25,8 +26,8 @@ public class PlatformFromImageGenerator : MonoBehaviour
         // тут нужно дописат команду вызова и скрипт подготовить, чтобы он мог по команде вызывать. 
         // дефолтные аргменты надо убрать в юнити, чтлобы их можно было менять. А можно альтернативные дефолтные сделать просто
         p.StartInfo.FileName = "cmd.exe";
-        p.StartInfo.Arguments = String.Format("/C python {0} {1} {2} {3}",
-            scriptPath, imagePath, grayThreshold, criticalDrop.ToString("0.000000000", System.Globalization.CultureInfo.InvariantCulture));
+        p.StartInfo.Arguments = String.Format("/C python {0} {1} {2} {3} {4}",
+            scriptPath, imagePath, grayThreshold, criticalDrop.ToString("0.000000000", System.Globalization.CultureInfo.InvariantCulture), scaleFix ? 1 : 0);
 
         p.Start();
         string output = p.StandardOutput.ReadToEnd();
@@ -98,11 +99,6 @@ public class PlatformFromImageGenerator : MonoBehaviour
                 spriteShapeController.spline.SetHeight(j, 0.1f);
             }
 
-
-            // spriteShapeController.spriteShape = UnityEngine.U2D.SpriteShapeUtility.GenerateSpriteShape(
-            //     platforms[i].GetComponent<UnityEngine.U2D.SpriteShapeRenderer>(),
-            //     ,
-            //     );
             spriteShapeController.RefreshSpriteShape();
             spriteShapeController.BakeMesh();
 

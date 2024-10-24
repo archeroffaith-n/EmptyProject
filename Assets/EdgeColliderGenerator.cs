@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -6,11 +7,13 @@ using UnityEngine;
 public class EdgeColliderGenerator : MonoBehaviour
 {
     public float heightFix = 0;
-    public int pointsQuantity = 1000;
+    public int pointsQuantity = 100;
     public float minRadius = 0.3f;
-    public float maxRadius = 1.0f;
-    public float criticalDrop = 0.03f;
-    public int numClusters = 5;
+    public float maxRadius = 3.0f;
+    public float minDistanceFrac = 0.02f;
+    public float criticalDrop = 0.15f;
+    public int maxSteps = 1;
+    public float minStep = 2f;
 
     private Vector3 scale;
     private Vector3 reverseScale;
@@ -33,6 +36,14 @@ public class EdgeColliderGenerator : MonoBehaviour
 
     UnityEngine.U2D.SpriteShapeController spriteShapeController;
     GameObject[] colliderObjects;
+
+    enum MergeStages
+    {
+        SimilarSize,
+        Singles,
+        SmallSteps,
+        SmallDiff
+    }
 
     Vector2 CalculateBezierPoint(float t, Vector2 p0, Vector2 handlerP0, Vector2 handlerP1, Vector2 p1)
     {
@@ -103,11 +114,6 @@ public class EdgeColliderGenerator : MonoBehaviour
 
         return -area;
     }
-
-    Vector3 anchorPoint;
-    Vector3 badPoint;
-    Vector3 mirroredBadPoint;
-    Vector3 resCenter;
 
     void CalculateShape()
     {
@@ -230,38 +236,22 @@ public class EdgeColliderGenerator : MonoBehaviour
 
             Vector3 secondDerivativeApprox = (tangents[right] - tangents[left]) / (points[right] - points[left]).magnitude;
             float curvature = -secondDerivativeApprox.magnitude * Mathf.Sign(Vector3.Dot(secondDerivativeApprox, normals[i]));
-            if (curvature > 0)
-            {
-                curvature = Mathf.Min(1 / minRadius, curvature);
-            }
 
             curvatures[i] = curvature;
 
-            curvature = Mathf.Max(curvatures[i], 1e-5f);
-
-            radiuses[i] = Mathf.Max(1 / curvatures[i], minRadius);
+            if (curvature > 0) {
+                curvature = Mathf.Max(curvature, 1 / maxRadius);
+                radiuses[i] = Mathf.Max(1 / curvature, minRadius);
+            } else {
+                radiuses[i] = maxRadius;
+            }
         }
 
         // Проверка, что радиусы не выходят за границы в других точках
-        float lastPositiveRadius = 1e7f;
         for (int i = 0; i < points.Length; ++i)
         {
-            if (radiuses[i] > 0)
-            {
-                lastPositiveRadius = radiuses[i];
-            }
-        }
-        for (int i = 0; i < points.Length; ++i)
-        {
-            if (radiuses[i] > 0)
-            {
-                lastPositiveRadius = radiuses[i];
-            }
             maxRadiuses[i] = radiuses[i];
-            if (maxRadiuses[i] < 0)
-            {
-                maxRadiuses[i] = lastPositiveRadius;
-            }
+
             Vector3 center = points[i] - normals[i] * maxRadiuses[i];
             for (int j = 0; j < points.Length; ++j)
             {
@@ -293,6 +283,7 @@ public class EdgeColliderGenerator : MonoBehaviour
 
                 maxRadiuses[i] = (points[i] - center).magnitude;
             }
+
             maxRadiuses[i] = Mathf.Max(Mathf.Min(maxRadiuses[i], maxRadius), minRadius);
         }
 
@@ -309,6 +300,9 @@ public class EdgeColliderGenerator : MonoBehaviour
             {
                 if ((j == points.Length) || (Mathf.Abs(Vector3.Dot(normals[selectedIndex], points[j] - points[selectedIndex])) > criticalDrop))
                 {
+                    break;
+                }
+                if ((j == points.Length) || (lengths[j] - lengths[selectedIndex] > minDistanceFrac * lengths[points.Length])) {
                     break;
                 }
             }
@@ -337,44 +331,203 @@ public class EdgeColliderGenerator : MonoBehaviour
         // Кластеризация точек по радиусам, чтобы использовать наименьшее количество разнообразных радиусов
         int[] clusterId = new int[numSelectedPoints];
         float[] clusterValue = new float[numSelectedPoints];
+        float[] maxClusterValue = new float[numSelectedPoints];
+        int[] clusterSize = new int[numSelectedPoints];
         for (int i = 0; i < numSelectedPoints; ++i)
         {
             clusterId[i] = i;
             clusterValue[i] = selectedMaxRadiuses[i];
+            clusterSize[i] = 1;
+            maxClusterValue[i] = selectedMaxRadiuses[i];
         }
 
-        for (int numMerges = 0; numMerges < numSelectedPoints - numClusters; ++numMerges)
+
+        // Debug.Log(String.Join(", ", clusterValue));
+
+        MergeStages mergeStage = MergeStages.SimilarSize;
+        float minStepsValue = 0f;
+        float maxStepsValue = 0f;
+        float stepValue = 0f;
+        int validFrom = 0;
+        int validUntil = 0;
+        bool stepsIncreasing = true;
+        for (int numMerges = 0; numMerges < numSelectedPoints - 1; ++numMerges)
         {
             System.Tuple<int, int> bestMergePair = null;
-            float bestDiff = 1e9f;
-            for (int i = 0; i < numSelectedPoints; ++i)
-            {
-                int left = i == 0 ? numSelectedPoints - 1 : i - 1;
-                if (clusterId[i] != clusterId[left])
+            float minValue = 100f;
+            float maxValue = 0f;
+            while (bestMergePair == null) {
+                for (int i = 0; i < numSelectedPoints; ++i)
                 {
-                    float diff = (clusterValue[i] - clusterValue[left]) / Mathf.Min(clusterValue[i], clusterValue[left]);
-                    if (bestDiff > Mathf.Abs(diff))
+                    bool merge = false;
+                    int left = i == 0 ? numSelectedPoints - 1 : i - 1;
+                    if (clusterId[i] != clusterId[left])
                     {
-                        bestDiff = Mathf.Abs(diff);
-                        if (diff >= 0)
-                        {
-                            bestMergePair = System.Tuple.Create(clusterId[left], clusterId[i]);
+                        if (mergeStage == MergeStages.SimilarSize) {
+                            float minClustVal = Mathf.Min(clusterValue[left], clusterValue[i]);
+                            float maxClustVal = Mathf.Max(maxClusterValue[left], maxClusterValue[i]);
+                            float diff = (maxClustVal - minClustVal) / maxClustVal;
+                            if (diff < 0.05) {
+                                merge = true;
+                            }
+                        } else if (mergeStage == MergeStages.Singles) {
+                            int minIndex = 0;
+                            int maxIndex = 0;
+                            if (clusterValue[left] < clusterValue[i])
+                            {
+                                minIndex = left;
+                                maxIndex = i;
+                            }
+                            else
+                            {
+                                minIndex = i;
+                                maxIndex = left;
+                            }
+                            if (clusterSize[maxIndex] == 1 && clusterValue[minIndex] > maxValue) {
+                                maxValue = clusterValue[minIndex];
+                                merge = true;
+                            }
+                        } else if (mergeStage == MergeStages.SmallSteps) {
+                            if (i == validUntil || i == validFrom) {
+                                if (i == validUntil) {
+                                    stepsIncreasing = false;
+                                }
+                                if (i == validFrom) {
+                                    stepsIncreasing = true;
+                                }
+                                for (int localI = 0; localI < numSelectedPoints; ++localI)
+                                {
+                                    if (stepsIncreasing) {
+                                        if (clusterValue[localI] > maxStepsValue) {
+                                            maxStepsValue = clusterValue[localI];
+                                            validUntil = localI;
+                                        } else {
+                                            break;
+                                        }
+                                    } else {
+                                        if (clusterValue[localI] < minStepsValue) {
+                                            minStepsValue = clusterValue[localI];
+                                            validFrom = localI;
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                }
+                                stepValue = Mathf.Max(Mathf.Pow(maxStepsValue / minStepsValue, 1.0f / maxSteps), minStep);
+                            }
+                            
+                            int posLeft = 0;
+                            for (; posLeft < maxSteps; ++posLeft) {
+                                if (clusterValue[left] >= minStepsValue * Mathf.Pow(stepValue, posLeft) - 0.1f
+                                    && clusterValue[left] < minStepsValue * Mathf.Pow(stepValue, posLeft + 1) - 0.1f) {
+                                    break;
+                                }
+                            }
+                            int posI = 0;
+                            for (; posI < maxSteps; ++posI) {
+                                if (clusterValue[i] >= minStepsValue * Mathf.Pow(stepValue, posI) - 0.1f
+                                    && clusterValue[i] < minStepsValue * Mathf.Pow(stepValue, posI + 1) - 0.1f) {
+                                    break;
+                                }
+                            }
+                            float minClustVal = Mathf.Min(clusterValue[left], clusterValue[i]);
+                            if (posLeft == posI && minClustVal < minValue) {
+                                minValue = minClustVal;
+                                merge = true;
+                            }
+                        } else if (mergeStage == MergeStages.SmallDiff) {
+                            float diff = Mathf.Abs(clusterValue[left] - clusterValue[i]) / (clusterValue[left] + clusterValue[i]);
+                            float minClustVal = Mathf.Max(clusterValue[left], clusterValue[i]);
+                            if (diff < 0.2 && minClustVal < minValue) {
+                                minValue = minClustVal;
+                                merge = true;
+                            }
                         }
-                        else
-                        {
-                            bestMergePair = System.Tuple.Create(clusterId[i], clusterId[left]);
+
+                        if (merge) {
+                            if (clusterValue[left] < clusterValue[i])
+                            {
+                                bestMergePair = System.Tuple.Create(clusterId[left], clusterId[i]);
+                            }
+                            else
+                            {
+                                bestMergePair = System.Tuple.Create(clusterId[i], clusterId[left]);
+                            }
                         }
+                    }
+                }
+
+                if (bestMergePair == null) {
+                    if (mergeStage == MergeStages.SimilarSize) {
+                        // Debug.Log("Before Singles");
+                        // Debug.Log(String.Join(", ", clusterValue));
+                        // Debug.Log(String.Join(", ", clusterSize));
+                        mergeStage = MergeStages.Singles;
+                    } else if (mergeStage == MergeStages.Singles) {
+                        // Debug.Log("Before SmallSteps");
+                        // Debug.Log(String.Join(", ", clusterValue));
+                        // Debug.Log(String.Join(", ", clusterSize));
+                        minStepsValue = clusterValue[0];
+                        maxStepsValue = clusterValue[0];
+                        if (clusterValue[0] > clusterValue[1]) {
+                            stepsIncreasing = false;
+                        }
+                        for (int i = numSelectedPoints - 1; i >= 0; --i)
+                        {
+                            if (stepsIncreasing) {
+                                if (clusterValue[i] <= minStepsValue) {
+                                    minStepsValue = clusterValue[i];
+                                    validFrom = i;
+                                } else {
+                                    break;
+                                }
+                            } else {
+                                if (clusterValue[i] >= maxStepsValue) {
+                                    maxStepsValue = clusterValue[i];
+                                    validUntil = i;
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                        for (int i = 1; i < numSelectedPoints; ++i)
+                        {
+                            if (stepsIncreasing) {
+                                if (clusterValue[i] >= maxStepsValue) {
+                                    maxStepsValue = clusterValue[i];
+                                    validUntil = i;
+                                } else {
+                                    break;
+                                }
+                            } else {
+                                if (clusterValue[i] <= minStepsValue) {
+                                    minStepsValue = clusterValue[i];
+                                    validFrom = i;
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                        stepValue = Mathf.Max(Mathf.Pow(maxStepsValue / minStepsValue, 1.0f / maxSteps), minStep);
+                        mergeStage = MergeStages.SmallSteps;
+                    } else if (mergeStage == MergeStages.SmallSteps) {
+                        mergeStage = MergeStages.SmallDiff;
+                    } else if (mergeStage == MergeStages.SmallDiff) {
+                        break;
                     }
                 }
             }
 
-            if (bestMergePair == null)
-            {
-                throw new System.Exception("No possible merges found");
+            if (bestMergePair == null) {
+                break;
             }
 
             for (int i = 0; i < numSelectedPoints; ++i)
             {
+                if (clusterId[i] == bestMergePair.Item1)
+                {
+                    maxClusterValue[i] = maxClusterValue[bestMergePair.Item2];
+                }
                 if (clusterId[i] == bestMergePair.Item2)
                 {
                     clusterId[i] = bestMergePair.Item1;
@@ -383,9 +536,20 @@ public class EdgeColliderGenerator : MonoBehaviour
                         Debug.Log("Smth wrong");
                     }
                     clusterValue[i] = clusterValue[bestMergePair.Item1];
+                    clusterSize[bestMergePair.Item1] += 1;
+                }
+            }
+            for (int i = 0; i < numSelectedPoints; ++i)
+            {
+                if (clusterId[i] == bestMergePair.Item1)
+                {
+                    clusterSize[i] = clusterSize[bestMergePair.Item1];
                 }
             }
         }
+        
+        // Debug.Log(String.Join(", ", clusterValue));
+        // Debug.Log(String.Join(", ", clusterSize));
 
         for (int i = 0; i < numSelectedPoints; ++i)
         {
@@ -409,7 +573,6 @@ public class EdgeColliderGenerator : MonoBehaviour
                 DestroyImmediate(colliderObject);
             }
         }
-        colliderObjects = new GameObject[numClusters];
 
         scale = transform.lossyScale;
         reverseScale = new Vector3(1 / scale.x, 1 / scale.y, 1 / scale.z);
@@ -439,7 +602,7 @@ public class EdgeColliderGenerator : MonoBehaviour
             int left = index == 0 ? selectedPoints.Length - 1 : index - 1;
             int right = index == selectedPoints.Length - 1 ? 0 : index + 1;
 
-            if (selectedMaxRadiuses[index] != selectedMaxRadiuses[left])
+            if (selectedMaxRadiuses[index] != selectedMaxRadiuses[left] || i == 0)
             {
                 colliderRadiuses.Add(selectedMaxRadiuses[index]);
                 colliderPoints.Add(new List<Vector2>());
@@ -458,13 +621,9 @@ public class EdgeColliderGenerator : MonoBehaviour
             }
         }
 
-        if (colliderPoints.Count != numClusters)
-        {
-            throw new System.Exception("Bad resulting num clusters");
-        }
+        colliderObjects = new GameObject[colliderPoints.Count];
 
-
-        for (int i = 0; i < numClusters; ++i)
+        for (int i = 0; i < colliderPoints.Count; ++i)
         {
             colliderObjects[i] = new GameObject(System.String.Format("Edge Collider {0}", i), typeof(EdgeCollider2D));
             colliderObjects[i].transform.SetParent(gameObject.transform, false);
@@ -473,4 +632,23 @@ public class EdgeColliderGenerator : MonoBehaviour
             edgeCollider.edgeRadius = colliderRadiuses.ElementAt(i);
         }
     }
+
+    // void OnDrawGizmosSelected()
+    // {
+    //     if (points == null) {
+    //         return;
+    //     }
+    //     Gizmos.color = new Color(0, 0, 1, 1F);
+    //     for (int i = 0; i < points.Length; i += 70) 
+    //     {
+    //         Gizmos.DrawWireSphere(transform.position + points[i] - normals[i] * maxRadiuses[i], maxRadiuses[i]);
+    //     }
+
+    //     Gizmos.color = new Color(1, 0, 0, 1F);
+    //     for (int i = 0; i < selectedPoints.Length; ++i) 
+    //     {
+    //         Gizmos.DrawWireSphere(transform.position + selectedPoints[i] - selectedNormals[i] * selectedMaxRadiuses[i], selectedMaxRadiuses[i]);
+    //     }
+        
+    // }
 }
