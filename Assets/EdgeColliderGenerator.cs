@@ -245,6 +245,9 @@ public class EdgeColliderGenerator : MonoBehaviour
             } else {
                 radiuses[i] = maxRadius;
             }
+
+            // На следующих шагах и так проверим, что радиус не выходит за границу
+            radiuses[i] = maxRadius;
         }
 
         // Проверка, что радиусы не выходят за границы в других точках

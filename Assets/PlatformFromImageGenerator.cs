@@ -13,8 +13,26 @@ public class PlatformFromImageGenerator : MonoBehaviour
     public float criticalDrop = 0.003f;
     public float scale = 100f;
     public bool scaleFix = true;
+    public float height = 0.1f;
 
     private GameObject[] platforms;
+
+
+    Vector2 CalculateBezierPoint(float t, Vector2 p0, Vector2 handlerP0, Vector2 handlerP1, Vector2 p1)
+    {
+        float u = 1.0f - t;
+        float tt = t * t;
+        float uu = u * u;
+        float uuu = uu * u;
+        float ttt = tt * t;
+
+        Vector2 p = uuu * p0;
+        p += 3f * uu * t * handlerP0;
+        p += 3f * u * tt * handlerP1;
+        p += ttt * p1;
+
+        return p;
+    }
 
     [ContextMenu("GeneratePlatforms")]
     void GeneratePlatforms()
@@ -103,6 +121,36 @@ public class PlatformFromImageGenerator : MonoBehaviour
             spriteShapeController.BakeMesh();
 
             lastRow += numPoints;
+        }
+
+        for (int index = 0; index < numPlatforms; ++index)
+        {
+            var spriteShapeController = platforms[index].GetComponent<UnityEngine.U2D.SpriteShapeController>();
+            int pointsNum = spriteShapeController.spline.GetPointCount();
+            for (int i = 0; i < pointsNum; ++i) {
+                int right = i == pointsNum - 1 ? 0 : i + 1;
+                int left = i == 0 ? pointsNum - 1 : i - 1;
+
+                Vector3 pointRight = CalculateBezierPoint(
+                    0.01f, 
+                    spriteShapeController.spline.GetPosition(i), 
+                    spriteShapeController.spline.GetRightTangent(i) + spriteShapeController.spline.GetPosition(i), 
+                    spriteShapeController.spline.GetLeftTangent(right) + spriteShapeController.spline.GetPosition(right), 
+                    spriteShapeController.spline.GetPosition(right));
+
+                Vector3 pointLeft = CalculateBezierPoint(
+                    1f - 0.01f, 
+                    spriteShapeController.spline.GetPosition(left), 
+                    spriteShapeController.spline.GetRightTangent(left) + spriteShapeController.spline.GetPosition(left), 
+                    spriteShapeController.spline.GetLeftTangent(i) + spriteShapeController.spline.GetPosition(i), 
+                    spriteShapeController.spline.GetPosition(i));
+
+                Vector3 firstDerivativeApprox = (pointRight - pointLeft).normalized;
+                Vector3 normal = Vector2.Perpendicular(firstDerivativeApprox).normalized;
+
+                spriteShapeController.spline.SetHeight(i, height);
+                spriteShapeController.spline.SetPosition(i, spriteShapeController.spline.GetPosition(i) - normal * height / 4f);
+            }
         }
     }
 }

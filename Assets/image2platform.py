@@ -76,8 +76,8 @@ def densify(x, y):
     return v[:, 0], v[:, 1]
 
 def collinear(a, b, c):
-    scale = np.max([a, b, c], axis=0)
-    a, b, c = a / scale, b / scale, c / scale
+    # scale = np.max([a, b, c], axis=0)
+    # a, b, c = a / scale, b / scale, c / scale
     r = (b - a) * np.flip(c - a)
     return abs(r[0] - r[1]) < 1e-6
 
@@ -156,7 +156,8 @@ def main(img_path, gray_threshold=110, critical_drop=0.0001, scale_fix=1, plot=0
             while i < len(points):
                 left = i - 1
                 right = i + 1 if i != len(points) - 1 else 0
-                if collinear_multiple(points[left], tangent_right[left], tangent_left[i],  points[i], tangent_right[i], tangent_left[right], points[right]):
+                # if collinear_multiple(points[left], tangent_right[left], tangent_left[i], points[i], tangent_right[i], tangent_left[right], points[right]):
+                if collinear_multiple(points[left], tangent_right[left], points[i], tangent_left[right], points[right]):
                     del points[i]
                     del tangent_right[i]
                     del tangent_left[i]
