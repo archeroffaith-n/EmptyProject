@@ -102,6 +102,16 @@ def main(img_path, gray_threshold=110, critical_drop=0.0001, scale_fix=1, plot=0
     img[trans_mask] = [255, 255, 255, 255]
     img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
 
+    frac = 0.05
+    new_img = np.full((int(img.shape[0] * (1 + frac)), int(img.shape[1] * (1 + frac))), 255, dtype=img.dtype)
+    new_img[
+        int(img.shape[0] * frac / 2) : int(img.shape[0] * frac / 2) + img.shape[0], 
+        int(img.shape[1] * frac / 2) : int(img.shape[1] * frac / 2) + img.shape[1]] = img
+    img = new_img
+
+    # cv2.imshow('image',img)
+    # cv2.waitKey(0)
+
     _, threshold = cv2.threshold(img, gray_threshold, 255, cv2.THRESH_BINARY) 
 
     contours, _ = cv2.findContours(threshold, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE) 
