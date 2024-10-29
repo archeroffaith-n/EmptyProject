@@ -97,7 +97,11 @@ def main(img_path, gray_threshold=110, critical_drop=0.0001, scale_fix=1, plot=0
 
     num_points = 50
 
-    img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE) 
+    img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
+    trans_mask = img[:,:,3] == 0
+    img[trans_mask] = [255, 255, 255, 255]
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+
     _, threshold = cv2.threshold(img, gray_threshold, 255, cv2.THRESH_BINARY) 
 
     contours, _ = cv2.findContours(threshold, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE) 
