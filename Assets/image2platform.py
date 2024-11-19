@@ -88,7 +88,7 @@ def collinear_multiple(*args):
             return False
     return True
 
-def main(img_path, gray_threshold=110, critical_drop=0.0001, scale_fix=1, plot=0):
+def main(img_path, gray_threshold=110, critical_drop=0.0001, scale_fix=1, min_area=0.001, plot=0):
     if not os.path.isfile(img_path):
         raise ValueError("Img file doesn't exist. Path must be relative to main project folder")
     
@@ -98,8 +98,10 @@ def main(img_path, gray_threshold=110, critical_drop=0.0001, scale_fix=1, plot=0
     num_points = 50
 
     img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
-    trans_mask = img[:,:,3] == 0
-    img[trans_mask] = [255, 255, 255, 255]
+    if img.shape[2] == 4:
+        trans_mask = img[:,:,3] == 0
+        img[trans_mask] = [255, 255, 255, 255]
+
     img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
 
     frac = 0.05
@@ -109,86 +111,86 @@ def main(img_path, gray_threshold=110, critical_drop=0.0001, scale_fix=1, plot=0
         int(img.shape[1] * frac / 2) : int(img.shape[1] * frac / 2) + img.shape[1]] = img
     img = new_img
 
-    # cv2.imshow('image',img)
+    # cv2.imshow('image', cv2.resize(img, (1000, 1000)))
     # cv2.waitKey(0)
 
     _, threshold = cv2.threshold(img, gray_threshold, 255, cv2.THRESH_BINARY) 
 
-    contours, _ = cv2.findContours(threshold, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE) 
-
+    all_contours, _ = cv2.findContours(threshold, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+ 
     total_area = img.shape[0] * img.shape[1]
     min_side = min(img.shape[:2])
-
-    num_contours = 0
-    for cnt in contours: 
-        area = cv2.contourArea(cnt) 
-        if area < total_area * 0.99:
-            num_contours += 1
+ 
+    contours = []
+    for cnt in all_contours:
+        area = cv2.contourArea(cnt)
+        if area >= total_area * 0.99 or area < total_area * min_area:
+            continue
+        contours.append(cnt)
     
-    print(num_contours)
+    print(len(contours))
 
     for cnt in contours: 
         area = cv2.contourArea(cnt) 
-        if area < total_area * 0.99:
-            x = cnt[:, 0, 0] / min_side
-            y = (img.shape[0] - cnt[:, 0, 1]) / min_side
+        x = cnt[:, 0, 0] / min_side
+        y = (img.shape[0] - cnt[:, 0, 1]) / min_side
 
-            if scale_fix:
-                min_x, max_x = min(x), max(x)
-                min_y, max_y = min(y), max(y)
+        if scale_fix:
+            min_x, max_x = min(x), max(x)
+            min_y, max_y = min(y), max(y)
+        else:
+            min_x, max_x = 0.0, 1.0
+            min_y, max_y = 0.0, 1.0
+
+        scale = max(max_x - min_x, max_y - min_y)
+        x = (x - min_x) / scale
+        y = (y - min_y) / scale
+        reverse_vec = np.array([min_x, min_y])
+
+        x, y = densify(x, y)            
+
+        tck, u = interpolate.splprep([x, y], s=critical_drop, k=3, per=True)
+
+        unew = np.arange(0, 1 + 1 / num_points, 1 / num_points)
+        out = interpolate.splev(unew, tck)
+
+        res = b_spline_to_bezier_series(tck, per=True)
+        points_bez = np.array([el[0] for el in res])
+
+        if plot:
+            plt.plot(x, y, label='orig shape')
+            plt.scatter(x, y, label='orig shape')
+            plt.scatter(out[0], out[1], label='splprep')
+            plt.scatter(points_bez[:, 0], points_bez[:, 1], label='bezier_before')
+
+        points = [vec[0] * scale + reverse_vec for vec in res]
+        tangent_right = [vec[1] * scale + reverse_vec for vec in res]
+        tangent_left = [vec[2] * scale + reverse_vec for vec in [res[-1]] + res[:-1]]
+            
+        i = 0
+        points_bez = points_bez.tolist()
+        while i < len(points):
+            left = i - 1
+            right = i + 1 if i != len(points) - 1 else 0
+            # if collinear_multiple(points[left], tangent_right[left], tangent_left[i], points[i], tangent_right[i], tangent_left[right], points[right]):
+            if collinear_multiple(points[left], tangent_right[left], points[i], tangent_left[right], points[right]):
+                del points[i]
+                del tangent_right[i]
+                del tangent_left[i]
+                del points_bez[i]
             else:
-                min_x, max_x = 0.0, 1.0
-                min_y, max_y = 0.0, 1.0
+                i += 1
+        points_bez = np.array(points_bez)
 
-            scale = max(max_x - min_x, max_y - min_y)
-            x = (x - min_x) / scale
-            y = (y - min_y) / scale
-            reverse_vec = np.array([min_x, min_y])
+        if plot:
+            plt.scatter(points_bez[:, 0], points_bez[:, 1], label='bezier_after')
 
-            x, y = densify(x, y)            
+        center = sum(points) / len(points)
 
-            tck, u = interpolate.splprep([x, y], s=critical_drop, k=3, per=True)
-
-            unew = np.arange(0, 1 + 1 / num_points, 1 / num_points)
-            out = interpolate.splev(unew, tck)
-
-            res = b_spline_to_bezier_series(tck, per=True)
-            points_bez = np.array([el[0] for el in res])
-
-            if plot:
-                plt.plot(x, y, label='orig shape')
-                plt.scatter(x, y, label='orig shape')
-                plt.scatter(out[0], out[1], label='splprep')
-                plt.scatter(points_bez[:, 0], points_bez[:, 1], label='bezier_before')
-
-            points = [vec[0] * scale + reverse_vec for vec in res]
-            tangent_right = [vec[1] * scale + reverse_vec for vec in res]
-            tangent_left = [vec[2] * scale + reverse_vec for vec in [res[-1]] + res[:-1]]
-                
-            i = 0
-            points_bez = points_bez.tolist()
-            while i < len(points):
-                left = i - 1
-                right = i + 1 if i != len(points) - 1 else 0
-                # if collinear_multiple(points[left], tangent_right[left], tangent_left[i], points[i], tangent_right[i], tangent_left[right], points[right]):
-                if collinear_multiple(points[left], tangent_right[left], points[i], tangent_left[right], points[right]):
-                    del points[i]
-                    del tangent_right[i]
-                    del tangent_left[i]
-                    del points_bez[i]
-                else:
-                    i += 1
-            points_bez = np.array(points_bez)
-
-            if plot:
-                plt.scatter(points_bez[:, 0], points_bez[:, 1], label='bezier_after')
-
-            center = sum(points) / len(points)
-
-            print(len(points))
-            print(*center, sep='\t')
-            for vec in zip(points, tangent_right, tangent_left):
-                print(*vec[0], *vec[1], *vec[2], sep='\t')
+        print(len(points))
+        print(*center, sep='\t')
+        for vec in zip(points, tangent_right, tangent_left):
+            print(*vec[0], *vec[1], *vec[2], sep='\t')
 
     if plot:
         if scale_fix:
@@ -208,5 +210,6 @@ if __name__ == "__main__":
     parser.add_argument("gray-threshold", help="level of gray to distinct black and white", type=int)
     parser.add_argument("critical-drop", help="level of accuracy (lower is better)", type=float)
     parser.add_argument("scale-fix", help="tweak scale of each platform on image or not", type=int)
+    parser.add_argument("min-area", help="min size of platform in fraction of full image area", type=float)
     args = parser.parse_args()
-    main(vars(args)['image-path'], vars(args)['gray-threshold'], vars(args)['critical-drop'], vars(args)['scale-fix'])
+    main(vars(args)['image-path'], vars(args)['gray-threshold'], vars(args)['critical-drop'], vars(args)['scale-fix'], vars(args)['min-area'])

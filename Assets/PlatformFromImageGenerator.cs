@@ -13,6 +13,7 @@ public class PlatformFromImageGenerator : MonoBehaviour
     public float criticalDrop = 0.003f;
     public float scale = 100f;
     public bool scaleFix = true;
+    public float minArea = 0.001f;
     public float height = 0.1f;
 
     private GameObject[] platforms;
@@ -41,11 +42,13 @@ public class PlatformFromImageGenerator : MonoBehaviour
         p.StartInfo.UseShellExecute = false;
         p.StartInfo.RedirectStandardOutput = true;
         p.StartInfo.RedirectStandardError = true;
-        // тут нужно дописат команду вызова и скрипт подготовить, чтобы он мог по команде вызывать. 
-        // дефолтные аргменты надо убрать в юнити, чтлобы их можно было менять. А можно альтернативные дефолтные сделать просто
+
         p.StartInfo.FileName = "cmd.exe";
-        p.StartInfo.Arguments = String.Format("/C python {0} {1} {2} {3} {4}",
-            scriptPath, imagePath, grayThreshold, criticalDrop.ToString("0.000000000", System.Globalization.CultureInfo.InvariantCulture), scaleFix ? 1 : 0);
+        p.StartInfo.Arguments = String.Format("/C python {0} {1} {2} {3} {4} {5}",
+            scriptPath, imagePath, grayThreshold, 
+            criticalDrop.ToString("0.000000000", System.Globalization.CultureInfo.InvariantCulture), 
+            scaleFix ? 1 : 0, 
+            minArea.ToString("0.000000000", System.Globalization.CultureInfo.InvariantCulture));
 
         p.Start();
         string output = p.StandardOutput.ReadToEnd();
@@ -56,7 +59,7 @@ public class PlatformFromImageGenerator : MonoBehaviour
         {
             lastErrorLine = p.StandardError.ReadLine();
         }
-        if (lastErrorLine != null)
+        if (lastErrorLine != null && lastErrorLine.ToLower().Contains("error"))
         {
             throw new Exception(lastErrorLine);
         }
