@@ -8,17 +8,28 @@ public class PlatformTools : MonoBehaviour
 {
     public float height = 1.0f;
     public float reducePointsTo = 0.9f;
+    public float updateScaleTo = 2.0f;
+
+    private float totalScale = 1.0f;
+    private float totalPoints = 1.0f;
+    private Vector3 massCenter;
+
     private Vector3[] pointsOriginal;
     private Vector3[] rightTangentOriginal;
     private Vector3[] leftTangentOriginal;
     private float[] heightOriginal;
     private UnityEngine.U2D.ShapeTangentMode[] modeOriginal;
+    private float scaleOriginal;
     
     private Vector3[] pointsOriginalReal;
     private Vector3[] rightTangentOriginalReal;
     private Vector3[] leftTangentOriginalReal;
     private float[] heightOriginalReal;
     private UnityEngine.U2D.ShapeTangentMode[] modeOriginalReal;
+    private float scaleOriginalReal;
+
+    private List<EdgeCollider2D> colliders = new();
+    private List<List<Vector2>> colliderPoints = new();
 
     Vector2 CalculateBezierPoint(float t, Vector2 p0, Vector2 handlerP0, Vector2 handlerP1, Vector2 p1)
     {
@@ -36,9 +47,22 @@ public class PlatformTools : MonoBehaviour
         return p;
     }
 
+    void UpdateMassCenter()
+    {
+        var spriteShapeController = GetComponent<UnityEngine.U2D.SpriteShapeController>();
+        int pointsNum = spriteShapeController.spline.GetPointCount();
+
+        massCenter = Vector3.zero;
+        for (int i = 0; i < pointsNum; ++i) {
+            massCenter += spriteShapeController.spline.GetPosition(i);
+        }
+
+        massCenter *= 1 / pointsNum;
+    }
+
     void SaveAbsoluteOriginal()
     {
-        if (pointsOriginalReal == null) {
+        if (pointsOriginalReal == null || pointsOriginalReal.Length == 0) {
             var spriteShapeController = GetComponent<UnityEngine.U2D.SpriteShapeController>();
             int pointsNum = spriteShapeController.spline.GetPointCount();
 
@@ -47,6 +71,7 @@ public class PlatformTools : MonoBehaviour
             leftTangentOriginalReal = new Vector3[pointsNum];
             heightOriginalReal = new float[pointsNum];
             modeOriginalReal = new UnityEngine.U2D.ShapeTangentMode[pointsNum];
+            scaleOriginalReal = totalScale;
 
             for (int i = 0; i < pointsNum; ++i) {
                 pointsOriginalReal[i] = spriteShapeController.spline.GetPosition(i);
@@ -90,6 +115,29 @@ public class PlatformTools : MonoBehaviour
             spriteShapeController.spline.SetHeight(i, height);
             spriteShapeController.spline.SetPosition(i, spriteShapeController.spline.GetPosition(i) - normal * heightDiff / 4f);
         }
+
+        UpdateMassCenter();
+    }
+
+    [ContextMenu("UpdateScale")]
+    void UpdateScale()
+    {
+        SaveAbsoluteOriginal();
+
+        if (updateScaleTo <= 1e-3f) {
+            throw new Exception("Too small scale");
+        }
+
+        var spriteShapeController = GetComponent<UnityEngine.U2D.SpriteShapeController>();
+        int pointsNum = spriteShapeController.spline.GetPointCount();
+        for (int i = 0; i < pointsNum; ++i) {
+            spriteShapeController.spline.SetPosition(i, spriteShapeController.spline.GetPosition(i) * updateScaleTo);
+            spriteShapeController.spline.SetRightTangent(i, spriteShapeController.spline.GetRightTangent(i) * updateScaleTo);
+            spriteShapeController.spline.SetLeftTangent(i, spriteShapeController.spline.GetLeftTangent(i) * updateScaleTo);
+            spriteShapeController.spline.SetHeight(i, spriteShapeController.spline.GetHeight(i) * updateScaleTo);
+        }
+        
+        UpdateMassCenter();
     }
 
     float CollinearityValue(Vector3 a, Vector3 b, Vector3 c) 
@@ -118,12 +166,13 @@ public class PlatformTools : MonoBehaviour
     void ResetOrignalPoints()
     {
         pointsOriginal = null;
+        totalPoints = 1.0f;
     }
 
     [ContextMenu("RestoreOrignal")]
     void RestoreOrignalPoints()
     {
-        if (pointsOriginal != null) {
+        if (pointsOriginal != null && pointsOriginal.Length != 0) {
             var spriteShapeController = GetComponent<UnityEngine.U2D.SpriteShapeController>();
             spriteShapeController.spline.Clear();
 
@@ -134,23 +183,32 @@ public class PlatformTools : MonoBehaviour
                 spriteShapeController.spline.SetLeftTangent(i, leftTangentOriginal[i]);
                 spriteShapeController.spline.SetHeight(i, heightOriginal[i]);
             }
+            totalPoints = 1.0f;
+            totalScale = scaleOriginal;
+
+            UpdateMassCenter();
         }
     }
 
     [ContextMenu("RestoreAbsoluteOrignal")]
     void RestoreOrignalRealPoints()
     {
-        if (pointsOriginal != null) {
+        if (pointsOriginalReal != null && pointsOriginalReal.Length != 0) {
             var spriteShapeController = GetComponent<UnityEngine.U2D.SpriteShapeController>();
             spriteShapeController.spline.Clear();
 
-            for (int i = 0; i < pointsOriginal.Length; ++i) {
+            for (int i = 0; i < pointsOriginalReal.Length; ++i) {
                 spriteShapeController.spline.InsertPointAt(i,  pointsOriginalReal[i]);
                 spriteShapeController.spline.SetTangentMode(i, UnityEngine.U2D.ShapeTangentMode.Continuous);
                 spriteShapeController.spline.SetRightTangent(i, rightTangentOriginalReal[i]);
                 spriteShapeController.spline.SetLeftTangent(i, leftTangentOriginalReal[i]);
                 spriteShapeController.spline.SetHeight(i, heightOriginalReal[i]);
             }
+            
+            totalPoints = 1.0f;
+            totalScale = scaleOriginalReal;
+
+            UpdateMassCenter();
         }
     }
 
@@ -162,12 +220,13 @@ public class PlatformTools : MonoBehaviour
         var spriteShapeController = GetComponent<UnityEngine.U2D.SpriteShapeController>();
         int pointsNum = spriteShapeController.spline.GetPointCount();
 
-        if (pointsOriginal == null) {
+        if (pointsOriginal == null || pointsOriginal.Length == 0) {
             pointsOriginal = new Vector3[pointsNum];
             rightTangentOriginal = new Vector3[pointsNum];
             leftTangentOriginal = new Vector3[pointsNum];
             heightOriginal = new float[pointsNum];
             modeOriginal = new UnityEngine.U2D.ShapeTangentMode[pointsNum];
+            scaleOriginal = totalScale;
 
             for (int i = 0; i < pointsNum; ++i) {
                 pointsOriginal[i] = spriteShapeController.spline.GetPosition(i);
@@ -216,6 +275,65 @@ public class PlatformTools : MonoBehaviour
             spriteShapeController.spline.RemovePointAt(index);
 
             pointsNum -= 1;
+        }
+        
+        totalPoints *= reducePointsTo;
+        
+        UpdateMassCenter();
+    }
+
+    [ContextMenu("RememberColliders")]
+    void RememberColliders()
+    {
+        foreach(Transform child in transform) {
+            if (child.gameObject.TryGetComponent<EdgeCollider2D>(out var collider)) {
+                colliders.Add(collider);
+                colliderPoints.Add(new List<Vector2>());
+                collider.GetPoints(colliderPoints.Last());
+            }
+        }
+        if (colliders.Count == 0) {
+            throw new Exception("No colliders found");
+        }
+    }
+
+    [ContextMenu("SplitColliders")]
+    void SplitColliders()
+    {
+        if (colliders.Count == 0) {
+            throw new Exception("You must remember colliders first");
+        }
+
+        foreach(var (collider, colliderPoint) in colliders.Zip(colliderPoints, (first, second) => (first, second))) {
+            List<Vector2> newColliderPoint = new();
+            collider.GetPoints(newColliderPoint);
+            if (newColliderPoint.Count() != colliderPoint.Count()) {
+                throw new Exception("Point removal is not supported");
+            }
+
+
+            List<List<Vector2>> newColliderPoints = new();
+
+            newColliderPoints.Add(new List<Vector2>());
+            foreach(var (oldPoint, newPoint) in colliderPoint.Zip(newColliderPoint, (first, second) => (first, second))) {
+                newColliderPoints.Last().Add(oldPoint);
+
+                if (oldPoint != newPoint) {
+                    newColliderPoints.Add(new List<Vector2>());
+                    newColliderPoints.Last().Add(oldPoint);
+                }
+            }
+
+            if (newColliderPoints.Count > 1) {
+                int i = 0;
+                foreach(var resultColliderPoint in newColliderPoints) {
+                    var newColliderGameObject = Instantiate(collider.gameObject, collider.gameObject.transform.parent);
+                    newColliderGameObject.transform.name = collider.gameObject.transform.name + " (" + i.ToString() + ")";
+                    newColliderGameObject.GetComponent<EdgeCollider2D>().SetPoints(resultColliderPoint);
+                    i += 1;
+                }
+                collider.gameObject.SetActive(false);
+            }
         }
     }
 }
