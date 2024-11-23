@@ -286,7 +286,7 @@ public class PlatformTools : MonoBehaviour
     void RememberColliders()
     {
         foreach(Transform child in transform) {
-            if (child.gameObject.TryGetComponent<EdgeCollider2D>(out var collider)) {
+            if (child.gameObject.TryGetComponent<EdgeCollider2D>(out var collider) && child.gameObject.activeSelf) {
                 colliders.Add(collider);
                 colliderPoints.Add(new List<Vector2>());
                 collider.GetPoints(colliderPoints.Last());
@@ -310,6 +310,7 @@ public class PlatformTools : MonoBehaviour
             if (newColliderPoint.Count() != colliderPoint.Count()) {
                 throw new Exception("Point removal is not supported");
             }
+            collider.SetPoints(colliderPoint);
 
 
             List<List<Vector2>> newColliderPoints = new();
